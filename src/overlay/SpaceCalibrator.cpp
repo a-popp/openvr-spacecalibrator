@@ -30,13 +30,8 @@ name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #define LEGACY_OPENVR_APPLICATION_KEY "pushrax.SpaceCalibrator"
-#define OPENVR_APPLICATION_KEY "steam.overlay.3368750"
-std::string c_SPACE_CALIBRATOR_STEAM_APP_ID = "3368750";
-std::string c_STEAMVR_STEAM_APP_ID = "250820";
-constexpr const char* STEAM_MUTEX_KEY = "Global\\MUTEX__SpaceCalibrator_Steam";
-HANDLE hSteamMutex = INVALID_HANDLE_VALUE;
-bool s_isGitHubVersionInstalled = false;
-
+#define LEGACY_STEAM_OPENVR_APPLICATION_KEY "steam.overlay.3368750"
+#define OPENVR_APPLICATION_KEY "a-popp.SpaceCalibrator"
 extern "C" __declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
 extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x00000001;
 
@@ -119,6 +114,7 @@ static GLFWwindow *CreateGLFWWindowWithFallback(int width, int height, const cha
 	for (const auto &h : hints)
 	{
 		glfwDefaultWindowHints();
+		glfwWindowHint(GLFW_VISIBLE, false);
 		glfwWindowHint(GLFW_RESIZABLE, false);
 
 #ifdef DEBUG_LOGS
@@ -170,12 +166,15 @@ void CreateGLFWWindow()
 	glGetIntegerv(GL_MAJOR_VERSION, &glMajor);
 	glGetIntegerv(GL_MINOR_VERSION, &glMinor);
 	char glslVersionString[32] = {};
-	snprintf(glslVersionString, sizeof(glslVersionString), "#version %d%d0", glMajor, glMinor);
-	fprintf(stderr, "SpaceCal: Using GLSL %s for ImGui backend\n", glslVersionString);
-
-	// Minimise the window
-	glfwIconifyWindow(glfwWindow);
+	// GLSL 1.50 corresponds to OpenGL 3.2; for 3.3+ the numbering aligns
+	if (glMajor == 3 && glMinor == 2)
+		snprintf(glslVersionString, sizeof(glslVersionString), "#version 150");
+	else
+		snprintf(glslVersionString, sizeof(glslVersionString), "#version %d%d0", glMajor, glMinor);
+	fprintf(stderr, "SpaceCal: Created OpenGL %d.%d context, using GLSL %s for ImGui backend\n",
+		glMajor, glMinor, glslVersionString);
 	HWND windowHwmd = glfwGetWin32Window(glfwWindow);
+	ShowWindow(windowHwmd, SW_HIDE);
 	EnableDarkModeTopBar(windowHwmd);
 
 	// Load icon and set it in the window
@@ -306,76 +305,6 @@ void RequestImmediateRedraw() {
 	immediateRedraw = true;
 }
 
-bool UninstallGithubSpaceCalibrator() {
-
-	// find the uninstall key
-
-	// HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenVRSpaceCalibrator
-	std::string uninstallKeyValue = GetRegistryString(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OpenVRSpaceCalibrator", "UninstallString");
-	if (uninstallKeyValue.empty()) {
-		// HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\OpenVRSpaceCalibrator
-		uninstallKeyValue = GetRegistryString(HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OpenVRSpaceCalibrator", "UninstallString");
-		if (uninstallKeyValue.empty()) {
-			// HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall
-			uninstallKeyValue = GetRegistryString(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OpenVRSpaceCalibrator", "UninstallString");
-		}
-	}
-
-	printf("uninst: %s\n", uninstallKeyValue.c_str());
-
-	if (!uninstallKeyValue.empty()) {
-
-		int size_needed = MultiByteToWideChar(CP_UTF8, 0, &uninstallKeyValue[0], (int)uninstallKeyValue.size(), 0, 0);
-		std::wstring uninstallPathUnicode(size_needed, 0);
-		MultiByteToWideChar(CP_UTF8, 0, &uninstallKeyValue[0], (int)uninstallKeyValue.size(), &uninstallPathUnicode[0], size_needed);
-
-		// split uninstall key into file and cli args
-		std::wstring executablePath = uninstallPathUnicode;
-		std::wstring commandLineArgs = uninstallPathUnicode;
-
-		// some form of parsing incase a fork changes the executable path and stuff
-		if (executablePath[0] == L'"') {
-			// executable name is wrapped in double quotes, find closing quote
-			auto it = std::find(executablePath.begin(), executablePath.end(), '"');
-			it = std::find(it + 1, executablePath.end(), '"');
-			if (it != executablePath.end()) {
-				size_t idx = it - executablePath.begin();
-				// now that we know where the quotes are, substring
-				executablePath = uninstallPathUnicode.substr(1, idx - 1);
-				commandLineArgs = uninstallPathUnicode.substr(idx + 1);
-			}
-		} else {
-			// executable name is until the first space, find it and split accordingly
-			auto it = std::find(executablePath.begin(), executablePath.end(), ' ');
-			if (it != executablePath.end()) {
-				size_t idx = it - executablePath.begin();
-				// now that we know where the quotes are, substring
-				executablePath = uninstallPathUnicode.substr(1, idx - 1);
-				commandLineArgs = uninstallPathUnicode.substr(idx);
-			}
-		}
-
-		SHELLEXECUTEINFO shExInfo = { 0 };
-		shExInfo.cbSize = sizeof(shExInfo);
-		shExInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
-		shExInfo.hwnd = 0;
-		shExInfo.lpVerb = L"open";
-		shExInfo.lpFile = L"ms-settings:appsfeatures";
-		shExInfo.lpParameters = L"";
-		shExInfo.lpDirectory = 0;
-		shExInfo.nShow = SW_SHOW;
-		shExInfo.hInstApp = 0;
-
-		if (ShellExecuteExW(&shExInfo))
-		{
-			// valid
-			return true;
-		}
-	}
-
-	return false;
-}
-
 double lastFrameStartTime = glfwGetTime();
 void RunLoop() {
 	while (!glfwWindowShouldClose(glfwWindow))
@@ -493,32 +422,6 @@ void RunLoop() {
 
 			BuildMainWindow(dashboardVisible);
 
-			// @TODO: Move to a separate function, for now it works
-			static bool githubPopupDismissed = false;
-
-			if (s_isGitHubVersionInstalled && !githubPopupDismissed) {
-				ImGui::OpenPopup("Conflicting Space Calibrator install");
-				if (ImGui::BeginPopupModal("Conflicting Space Calibrator install", 0, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
-					ImGui::Text("You have multiple versions of Space Calibrator installed!\n\nPlease uninstall the GitHub version to use the Steam version of Space Calibrator.\n\nDo you wish to open the settings app to uninstall the GitHub version of Space Calibrator? (SteamVR will have to be closed)");
-
-					ImGui::NewLine();
-
-					float windowWidth = ImGui::GetWindowWidth();
-					ImGui::SetCursorPosX(windowWidth / 11.0f);
-					if (ImGui::Button("Yes", ImVec2(windowWidth * 3.0f / 11.0f, 0))) {
-						UninstallGithubSpaceCalibrator();
-						githubPopupDismissed = true;
-					}
-					ImGui::SameLine();
-					ImGui::SetCursorPosX(windowWidth / 11.0f * 6.0f);
-					if (ImGui::Button("No", ImVec2(windowWidth * 3.0f / 11.0f, 0))) {
-						githubPopupDismissed = true;
-					}
-
-					ImGui::EndPopup();
-				}
-			}
-
 			ImGui::Render();
 
 			glBindFramebuffer(GL_FRAMEBUFFER, fboHandle);
@@ -601,76 +504,31 @@ void VerifySetupCorrect() {
 		std::cout << "Space Calibrator already registered with SteamVR. Skipping..." << std::endl;
 	}
 
-	// try removing the legacy app manifest from Steam, otherwise people will have multiple entries in the overlays menu
-	if (vr::VRApplications()->IsApplicationInstalled(LEGACY_OPENVR_APPLICATION_KEY)) {
-		std::cout << "Found a legacy version of Space Calibrator..." << std::endl;
-		// GitHub key is installed, uninstall it
+	auto removeLegacyManifest = [](const char* legacyKey) {
+		if (!vr::VRApplications()->IsApplicationInstalled(legacyKey))
+			return;
+		std::cout << "Found legacy version " << legacyKey << " of Space Calibrator..." << std::endl;
 		vr::EVRApplicationError appErr = vr::EVRApplicationError::VRApplicationError_None;
-		char manifestPathBuffer[MAX_PATH + 32 /* for good measure */] = {};
-		uint32_t szBufferSize = vr::VRApplications()->GetApplicationPropertyString(LEGACY_OPENVR_APPLICATION_KEY, vr::VRApplicationProperty_BinaryPath_String, manifestPathBuffer, sizeof(manifestPathBuffer), &appErr);
+		char manifestPathBuffer[MAX_PATH + 32] = {};
+		vr::VRApplications()->GetApplicationPropertyString(legacyKey, vr::VRApplicationProperty_BinaryPath_String, manifestPathBuffer, sizeof(manifestPathBuffer), &appErr);
 		if (appErr != vr::VRApplicationError_None) {
-			std::cout << "Failed to get binary path of " << LEGACY_OPENVR_APPLICATION_KEY << std::endl;
+			std::cout << "Failed to get binary path of " << legacyKey << std::endl;
 			return;
 		}
-		
-		// replace XXX.exe with manifest.vrmanifest
 		const char* newFileName = "manifest.vrmanifest";
 		char* lastSlash = strrchr(manifestPathBuffer, '\\');
 		if (lastSlash) {
 			*(lastSlash + 1) = '\0';
 			strcat(manifestPathBuffer, newFileName);
 		}
-
 		appErr = vr::VRApplications()->RemoveApplicationManifest(manifestPathBuffer);
 		if (appErr != vr::VRApplicationError_None) {
-			std::cout << "Failed to remove legacy application manifest. You may have duplicate entries in the overlays list." << std::endl;
+			std::cout << "Failed to remove legacy application manifest for " << legacyKey << ". You may have duplicate entries in the overlays list." << std::endl;
 		}
-	}
-}
+	};
 
-// Checks if a GitHub install of Space Calibrator is available when running via Steam.
-// If the GitHub version is found, we yell at the user telling them to uninstall it first as it conflicts with the Steam version
-void CheckGithubVersionInstalledOnSteam() {
-	// there are 3 locations for the uninstall string, test each one of them
-	
-	// HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenVRSpaceCalibrator
-	std::string uninstallKeyValue = GetRegistryString(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OpenVRSpaceCalibrator", "UninstallString");
-	if (!uninstallKeyValue.empty()) {
-		// Space Calibrator was installed via GitHub, but we're running via Steam! Uh oh!
-		s_isGitHubVersionInstalled = true;
-		return;
-	}
-
-	// HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\OpenVRSpaceCalibrator
-	uninstallKeyValue = GetRegistryString(HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OpenVRSpaceCalibrator", "UninstallString");
-	if (!uninstallKeyValue.empty()) {
-		// Space Calibrator was installed via GitHub, but we're running via Steam! Uh oh!
-		s_isGitHubVersionInstalled = true;
-		return;
-	}
-
-	// HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall
-	uninstallKeyValue = GetRegistryString(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OpenVRSpaceCalibrator", "UninstallString");
-	if (!uninstallKeyValue.empty()) {
-		// Space Calibrator was installed via GitHub, but we're running via Steam! Uh oh!
-		s_isGitHubVersionInstalled = true;
-		return;
-	}
-
-	// Also check for the presence of a driver in the SteamVR runtime's drivers directory (I should really make the installer not install the driver there...)
-	char cVrRuntimePath[MAX_PATH] = { 0 };
-	unsigned int szPathLen = 0;
-	vr::VR_GetRuntimePath(cVrRuntimePath, MAX_PATH, &szPathLen);
-	if (szPathLen > 0 && std::filesystem::is_directory(cVrRuntimePath)) {
-		// vr runtime path is valid, check if the drivers dir exists and likewise 01spacecalibrator is present
-		// can be found at: {runtimedir}\\drivers\\01spacecalibrator
-		std::filesystem::path spaceCalibratorGitHubDriverPath = cVrRuntimePath;
-		spaceCalibratorGitHubDriverPath = spaceCalibratorGitHubDriverPath / "drivers" / "01spacecalibrator";
-		if (std::filesystem::is_directory(spaceCalibratorGitHubDriverPath)) {
-			// drivers dir exists, so set state
-			s_isGitHubVersionInstalled = true;
-		}
-	}
+	removeLegacyManifest(LEGACY_OPENVR_APPLICATION_KEY);
+	removeLegacyManifest(LEGACY_STEAM_OPENVR_APPLICATION_KEY);
 }
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow)
@@ -692,38 +550,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
 	glfwSetErrorCallback(GLFWErrorCallback);
 
-	bool isRunningViaSteam = false;
-	char steamAppId[256] = {};
-	DWORD result = GetEnvironmentVariableA("SteamAppId", steamAppId, sizeof(steamAppId));
-	if (result > 0 && steamAppId != nullptr) {
-		if (c_SPACE_CALIBRATOR_STEAM_APP_ID == steamAppId ||
-			c_STEAMVR_STEAM_APP_ID == steamAppId) {
-			// We got launched via the Steam client UI.
-			hSteamMutex = CreateMutexA(NULL, FALSE, STEAM_MUTEX_KEY);
-			isRunningViaSteam = true;
-			if (hSteamMutex == nullptr) {
-				hSteamMutex = INVALID_HANDLE_VALUE;
-			} else {
-				// mutex opened, check if we opened one, if so exit
-				if (GetLastError() == ERROR_ALREADY_EXISTS) {
-					CloseHandle(hSteamMutex);
-					hSteamMutex = INVALID_HANDLE_VALUE;
-					return 0;
-				}
-			}
-		}
-	}
-
 	try {
 		InitVR();
-		printf("isSteam: %d\n", isRunningViaSteam);
-		if (isRunningViaSteam) {
-			CheckGithubVersionInstalledOnSteam();
-			printf("foundGithub: %d\n", s_isGitHubVersionInstalled);
-			if (s_isGitHubVersionInstalled) {
-
-			}
-		}
 		VerifySetupCorrect();
 		CreateGLFWWindow();
 		InitCalibrator();
@@ -749,11 +577,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 		wchar_t message[1024];
 		swprintf(message, 1024, L"%hs", e.what());
 		MessageBox(nullptr, message, L"Runtime Error", 0);
-	}
-
-	if (hSteamMutex != INVALID_HANDLE_VALUE && hSteamMutex != nullptr) {
-		CloseHandle(hSteamMutex);
-		hSteamMutex = nullptr;
 	}
 
 	if (glfwWindow)

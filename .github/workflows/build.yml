@@ -1,4 +1,4 @@
-name: Build
+name: Build and Release
 
 on:
   push:
@@ -9,18 +9,48 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
+      - name: Check for Version.h change
+        id: version_check
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $hasParent = git rev-parse --verify HEAD^ 2>$null
+          if ($hasParent) {
+            $changed = git diff --name-only HEAD^ HEAD | Select-String "src/common/Version\.h"
+          } else {
+            $changed = git diff-tree --no-commit-id --name-only -r HEAD | Select-String "src/common/Version\.h"
+          }
+          if ($changed) {
+            $content = Get-Content src/common/Version.h -Raw
+            if ($content -match 'SPACECAL_VERSION_STRING\s+"([^"]+)"') {
+              $version = $matches[1]
+              Write-Output "version=$version" >> $env:GITHUB_OUTPUT
+              Write-Output "changed=true" >> $env:GITHUB_OUTPUT
+              Write-Host "Version.h changed to $version"
+            }
+          } else {
+            Write-Output "changed=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Version.h not changed"
+          }
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure CMake
-        run: cmake -G "Visual Studio 17 2022" -A x64 -B bin -S . "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        run: cmake -G "Ninja Multi-Config" -B bin -S . "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
 
       - name: Build Release
         run: cmake --build bin --config Release
@@ -45,3 +75,41 @@ jobs:
             bin/driver_01spacecalibrator/resources/driver.vrresources
             bin/driver_01spacecalibrator/resources/settings/default.vrsettings
             bin/driver_01spacecalibrator/bin/win64/driver_01spacecalibrator.dll
+
+      - name: Package Release Artifacts
+        if: steps.version_check.outputs.changed == 'true'
+        run: |
+          New-Item -ItemType Directory -Force -Path release/overlay
+          Copy-Item bin/artifacts/Release/SpaceCalibrator.exe release/overlay/
+          Copy-Item bin/artifacts/Release/openvr_api.dll release/overlay/
+          Copy-Item bin/artifacts/Release/manifest.vrmanifest release/overlay/
+          Copy-Item bin/artifacts/Release/icon.png release/overlay/
+          Copy-Item bin/artifacts/Release/taskbar_icon.png release/overlay/
+          Compress-Archive -Path release/overlay/* -DestinationPath SpaceCalibrator-Overlay.zip
+          Compress-Archive -Path bin/driver_01spacecalibrator/* -DestinationPath SpaceCalibrator-Driver.zip
+
+      - name: Create Tag and Release
+        if: steps.version_check.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.version_check.outputs.version }}"
+          $tag = "v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          $existing = git tag -l $tag
+          if ($existing) {
+            Write-Host "Tag $tag already exists. Skipping."
+            exit 0
+          }
+
+          git tag $tag
+          git push origin $tag
+
+          gh release create $tag `
+            --title "Space Calibrator $version" `
+            --generate-notes `
+            SpaceCalibrator-Overlay.zip `
+            SpaceCalibrator-Driver.zip

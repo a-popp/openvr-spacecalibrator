@@ -35,3 +35,6 @@ Desktop.ini
 # Installer artifacts
 /install/*.exe
 /install/*.nsi.bak
+
+# Local files
+.local
