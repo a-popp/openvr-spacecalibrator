@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop, master]
+  pull_request:
+    branches: [main, develop, master]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+
+      - name: Configure CMake
+        run: cmake -G "Visual Studio 17 2022" -A x64 -B bin -S . "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+
+      - name: Build Release
+        run: cmake --build bin --config Release
+
+      - name: Upload Overlay Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpaceCalibrator-Overlay
+          path: |
+            bin/artifacts/Release/SpaceCalibrator.exe
+            bin/artifacts/Release/openvr_api.dll
+            bin/artifacts/Release/manifest.vrmanifest
+            bin/artifacts/Release/icon.png
+            bin/artifacts/Release/taskbar_icon.png
+
+      - name: Upload Driver Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpaceCalibrator-Driver
+          path: |
+            bin/driver_01spacecalibrator/driver.vrdrivermanifest
+            bin/driver_01spacecalibrator/resources/driver.vrresources
+            bin/driver_01spacecalibrator/resources/settings/default.vrsettings
+            bin/driver_01spacecalibrator/bin/win64/driver_01spacecalibrator.dll

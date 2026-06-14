@@ -1,0 +1,37 @@
+# Visual Studio / MSVC
+ipch
+.vs
+*.db
+*.opendb
+*.aps
+*.user
+*.suo
+*.ncb
+*.sdf
+*.cache
+
+# CMake build outputs
+bin/
+build/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# IDE files
+.code
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Installer artifacts
+/install/*.exe
+/install/*.nsi.bak
