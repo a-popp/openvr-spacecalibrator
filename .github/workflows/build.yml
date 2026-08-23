@@ -13,14 +13,13 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  gitleaks:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          submodules: recursive
 
       - name: Scan for secrets
         uses: gitleaks/gitleaks-action@v3
@@ -29,6 +28,16 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks.toml
           GITLEAKS_ENABLE_COMMENTS: true
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+  build-windows:
+    needs: gitleaks
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
       - name: Check for Version.h change
         id: version_check
