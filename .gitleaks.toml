@@ -1,0 +1,52 @@
+# Gitleaks configuration for Space Calibrator
+# https://github.com/gitleaks/gitleaks#configuration
+
+[extend]
+# Inherit the default gitleaks rules (API keys, tokens, private keys, etc.)
+useDefault = true
+
+# Global allowlist - paths/contents to ignore across all rules
+[allowlist]
+description = "Global allowlist"
+paths = [
+    # Build logs may contain environment-specific paths that look like secrets
+    '''build\.log''',
+    # Third-party submodules are not our responsibility to scan
+    '''lib/.*''',
+    # License files contain legal text, not secrets
+    '''LICENSE''',
+    # PDF assets are binary, not scannable
+    '''math\.pdf''',
+]
+
+# --- Custom rules for personal information ---
+
+[[rules]]
+id = "steam-account-credentials"
+description = "Steam account credentials"
+regex = '''(?i)(steam\s*(account|login|password|username|email)|steamguard|2fa\s*code).{0,20}[=:]\s*\S+'''
+tags = ["personal", "credentials"]
+
+[[rules]]
+id = "windows-credentials"
+description = "Windows credential strings"
+regex = '''(?i)(windows\s*(account|login|password|username)|ad\s*password|domain\s*password).{0,20}[=:]\s*\S+'''
+tags = ["personal", "credentials"]
+
+[[rules]]
+id = "private-ssh-key"
+description = "Private SSH key"
+regex = '''-----BEGIN (OPENSSH|RSA|EC|DSA) PRIVATE KEY-----'''
+tags = ["key", "credentials"]
+
+[[rules]]
+id = "api-key-generic"
+description = "Generic API key"
+regex = '''(?i)(api[_-]?key|secret[_-]?key|access[_-]?token).{0,20}[=:]\s*['"]?[A-Za-z0-9_\-]{20,}['"]?'''
+tags = ["api", "credentials"]
+
+[[rules]]
+id = "database-connection-string"
+description = "Database connection string with credentials"
+regex = '''(?i)(postgres|mysql|mongodb|redis|amqp)://[^\s:]+:[^\s@]+@'''
+tags = ["database", "credentials"]
