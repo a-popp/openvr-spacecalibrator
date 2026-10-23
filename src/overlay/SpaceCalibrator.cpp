@@ -519,7 +519,7 @@ void VerifySetupCorrect() {
 		char* lastSlash = strrchr(manifestPathBuffer, '\\');
 		if (lastSlash) {
 			*(lastSlash + 1) = '\0';
-			strcat(manifestPathBuffer, newFileName);
+			strcat_s(manifestPathBuffer, sizeof(manifestPathBuffer), newFileName);
 		}
 		appErr = vr::VRApplications()->RemoveApplicationManifest(manifestPathBuffer);
 		if (appErr != vr::VRApplicationError_None) {
@@ -588,6 +588,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
 static void HandleCommandLine(LPWSTR lpCmdLine)
 {
+	// lpCmdLine keeps any surrounding whitespace the launcher left around the
+	// arguments (e.g. PowerShell Start-Process appends a trailing space), so an
+	// exact lstrcmp would miss flags for most launch methods.
+	while (*lpCmdLine == L' ' || *lpCmdLine == L'\t') ++lpCmdLine;
+	size_t argLen = wcslen(lpCmdLine);
+	while (argLen > 0 && (lpCmdLine[argLen - 1] == L' ' || lpCmdLine[argLen - 1] == L'\t'))
+		lpCmdLine[--argLen] = L'\0';
+
 	if (lstrcmp(lpCmdLine, L"-openvrpath") == 0)
 	{
 		auto vrErr = vr::VRInitError_None;

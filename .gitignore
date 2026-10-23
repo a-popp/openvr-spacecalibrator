@@ -36,5 +36,9 @@ Desktop.ini
 /install/*.exe
 /install/*.nsi.bak
 
+# Build logs
+build.log
+*.log
+
 # Local files
 .local

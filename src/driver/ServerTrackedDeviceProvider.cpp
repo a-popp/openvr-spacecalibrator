@@ -10,16 +10,17 @@ vr::EVRInitError ServerTrackedDeviceProvider::Init(vr::IVRDriverContext *pDriver
 	TRACE("ServerTrackedDeviceProvider::Init()");
 	VR_INIT_SERVER_DRIVER_CONTEXT(pDriverContext);
 
-	memset(transforms, 0, vr::k_unMaxTrackedDeviceCount * sizeof DeviceTransform);
+	for (auto &tf : transforms)
+		tf = DeviceTransform{};
 	memset(&alignmentSpeedParams, 0, sizeof alignmentSpeedParams);
 
 	alignmentSpeedParams.thr_rot_tiny = 0.1f * (EIGEN_PI / 180.0f);
 	alignmentSpeedParams.thr_rot_small = 1.0f * (EIGEN_PI / 180.0f);
 	alignmentSpeedParams.thr_rot_large = 5.0f * (EIGEN_PI / 180.0f);
 
-	alignmentSpeedParams.thr_trans_tiny = 0.1f / 1000.0; // mm
-	alignmentSpeedParams.thr_trans_small = 1.0f / 1000.0; // mm
-	alignmentSpeedParams.thr_trans_large = 20.0f / 1000.0; // mm
+	alignmentSpeedParams.thr_trans_tiny = 0.1f / 1000.0; // distance squared, metres
+	alignmentSpeedParams.thr_trans_small = 1.0f / 1000.0; // distance squared, metres
+	alignmentSpeedParams.thr_trans_large = 20.0f / 1000.0; // distance squared, metres
 	
 	alignmentSpeedParams.align_speed_tiny = 0.05f;
 	alignmentSpeedParams.align_speed_small = 0.2f;
@@ -162,24 +163,11 @@ void ServerTrackedDeviceProvider::ApplyTransform(DeviceTransform& device, vr::Dr
 }
 
 
-inline vr::HmdQuaternion_t operator*(const vr::HmdQuaternion_t &lhs, const vr::HmdQuaternion_t &rhs) {
-	return {
-		(lhs.w * rhs.w) - (lhs.x * rhs.x) - (lhs.y * rhs.y) - (lhs.z * rhs.z),
-		(lhs.w * rhs.x) + (lhs.x * rhs.w) + (lhs.y * rhs.z) - (lhs.z * rhs.y),
-		(lhs.w * rhs.y) + (lhs.y * rhs.w) + (lhs.z * rhs.x) - (lhs.x * rhs.z),
-		(lhs.w * rhs.z) + (lhs.z * rhs.w) + (lhs.x * rhs.y) - (lhs.y * rhs.x)
-	};
-}
-
-inline vr::HmdVector3d_t quaternionRotateVector(const vr::HmdQuaternion_t& quat, const double(&vector)[3]) {
-	vr::HmdQuaternion_t vectorQuat = { 0.0, vector[0], vector[1] , vector[2] };
-	vr::HmdQuaternion_t conjugate = { quat.w, -quat.x, -quat.y, -quat.z };
-	auto rotatedVectorQuat = quat * vectorQuat * conjugate;
-	return { rotatedVectorQuat.x, rotatedVectorQuat.y, rotatedVectorQuat.z };
-}
-
 void ServerTrackedDeviceProvider::SetDeviceTransform(const protocol::SetDeviceTransform& newTransform)
 {
+	if (newTransform.openVRID >= vr::k_unMaxTrackedDeviceCount)
+		return;
+
 	auto &tf = transforms[newTransform.openVRID];
 	tf.enabled = newTransform.enabled;
 
@@ -206,6 +194,9 @@ void ServerTrackedDeviceProvider::SetDeviceTransform(const protocol::SetDeviceTr
 
 bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr::DriverPose_t &pose)
 {
+	if (openVRID >= vr::k_unMaxTrackedDeviceCount)
+		return true;
+
 	// Apply debug pose before anything else
 	if (openVRID > 0) {
 		auto dbgPos = convert(pose.vecPosition) + debugTransform;
@@ -233,7 +224,6 @@ bool ServerTrackedDeviceProvider::HandleDevicePoseUpdated(uint32_t openVRID, vr:
 
 		auto deviceWorldPose = toIsoPose(pose);
 		tf.currentRate = GetTransformDeltaSize(tf.currentRate, deviceWorldPose, tf.transform, tf.targetTransform);
-		double lerp = GetTransformRate(tf.currentRate);
 
 		BlendTransform(tf, deviceWorldPose);
 		ApplyTransform(tf, pose);

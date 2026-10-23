@@ -16,8 +16,8 @@
 	RequestExecutionLevel admin
 	ShowInstDetails show
 
-	; Define the version number
-	!define VERSION "1.5.1.0"
+	; Define the version number (keep in sync with src/common/Version.h)
+	!define VERSION "1.6.0.0"
 	; Set version information
 	VIProductVersion "${VERSION}"
 	VIAddVersionKey /LANG=1033 "ProductName" "Space Calibrator"

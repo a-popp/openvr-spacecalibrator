@@ -4,6 +4,8 @@
 #include <Eigen/Geometry>
 #include <Windows.h>
 #include <openvr.h>
+#include <algorithm>
+#include <iostream>
 #include <vector>
 #include <deque>
 
@@ -35,8 +37,8 @@ struct CalibrationContext
 
 	StandbyDevice targetStandby, referenceStandby;
 
-	Eigen::Vector3d calibratedRotation;
-	Eigen::Vector3d calibratedTranslation;
+	Eigen::Vector3d calibratedRotation = Eigen::Vector3d::Zero();
+	Eigen::Vector3d calibratedTranslation = Eigen::Vector3d::Zero();
 	double calibratedScale;
 
 	std::string referenceTrackingSystem;
@@ -59,7 +61,7 @@ struct CalibrationContext
 
 	float continuousCalibrationThreshold;
 	float maxRelativeErrorThreshold = 0.005f;
-	Eigen::Vector3d continuousCalibrationOffset;
+	Eigen::Vector3d continuousCalibrationOffset = Eigen::Vector3d::Zero();
 
 	protocol::AlignmentSpeedParams alignmentSpeedParams;
 	bool enableStaticRecalibration;
@@ -81,6 +83,7 @@ struct CalibrationContext
 	CalibrationContext() {
 		calibratedScale = 1.0;
 		memset(devicePoses, 0, sizeof(devicePoses));
+		std::fill(controllerIDs, controllerIDs + MAX_CONTROLLERS, -1);
 		ResetConfig();
 	}
 
@@ -89,9 +92,9 @@ struct CalibrationContext
 		alignmentSpeedParams.thr_rot_small = 0.5f * (EIGEN_PI / 180.0f);
 		alignmentSpeedParams.thr_rot_large = 5.0f * (EIGEN_PI / 180.0f);
 
-		alignmentSpeedParams.thr_trans_tiny = 0.98f / 1000.0; // mm
-		alignmentSpeedParams.thr_trans_small = 1.0f / 1000.0; // mm
-		alignmentSpeedParams.thr_trans_large = 20.0f / 1000.0; // mm
+		alignmentSpeedParams.thr_trans_tiny = 0.98f / 1000.0; // distance squared, metres
+		alignmentSpeedParams.thr_trans_small = 1.0f / 1000.0; // distance squared, metres
+		alignmentSpeedParams.thr_trans_large = 20.0f / 1000.0; // distance squared, metres
 
 		alignmentSpeedParams.align_speed_tiny = 1.0f;
 		alignmentSpeedParams.align_speed_small = 1.0f;
@@ -130,15 +133,15 @@ struct CalibrationContext
 		chaperone.playSpaceSize = vr::HmdVector2_t();
 		chaperone.valid = false;
 
-		calibratedRotation = Eigen::Vector3d();
-		calibratedTranslation = Eigen::Vector3d();
+		calibratedRotation = Eigen::Vector3d::Zero();
+		calibratedTranslation = Eigen::Vector3d::Zero();
 		calibratedScale = 1.0;
 		referenceTrackingSystem = "";
 		targetTrackingSystem = "";
 		enabled = false;
 		validProfile = false;
 		refToTargetPose = Eigen::AffineCompact3d::Identity();
-		relativePosCalibrated = true;
+		relativePosCalibrated = false;
 	}
 
 	size_t SampleCount()
@@ -199,12 +202,12 @@ struct CalibrationContext
 	}
 
 	bool TargetPoseIsValidSimple() const {
-		return targetID >= 0 && targetID <= vr::k_unMaxTrackedDeviceCount
+		return targetID >= 0 && targetID < vr::k_unMaxTrackedDeviceCount
 			&& devicePoses[targetID].poseIsValid && devicePoses[targetID].result == vr::ETrackingResult::TrackingResult_Running_OK;
 	}
 
 	bool ReferencePoseIsValidSimple() const {
-		return referenceID >= 0 && referenceID <= vr::k_unMaxTrackedDeviceCount
+		return referenceID >= 0 && referenceID < vr::k_unMaxTrackedDeviceCount
 			&& devicePoses[referenceID].poseIsValid && devicePoses[referenceID].result == vr::ETrackingResult::TrackingResult_Running_OK;
 	}
 };

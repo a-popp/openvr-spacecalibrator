@@ -7,7 +7,7 @@ on:
     branches: [main, develop, master]
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   contents: write
@@ -26,8 +26,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
-          GITLEAKS_ENABLE_COMMENTS: true
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_ENABLE_COMMENTS: "true"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
   build-windows:
     needs: gitleaks
@@ -72,6 +72,40 @@ jobs:
       - name: Build Release
         run: cmake --build bin --config Release
 
+      - name: Build Tests
+        run: cmake --build bin --config Release --target SpaceCalibratorTests
+
+      - name: Run Unit Tests
+        run: ctest --test-dir bin -C Release --output-on-failure
+
+      - name: Smoke Test Overlay
+        shell: pwsh
+        run: |
+          # No SteamVR is installed on the runner: -openvrpath must reach
+          # VR_Init, fail cleanly and exit -2. Any other outcome (crash,
+          # missing DLL import, exit 0) fails the check.
+          $p = Start-Process -FilePath "bin/artifacts/Release/SpaceCalibrator.exe" `
+            -ArgumentList "-openvrpath" -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput smoke_out.txt -RedirectStandardError smoke_err.txt
+          Get-Content smoke_out.txt, smoke_err.txt
+          if ($p.ExitCode -ne -2) { Write-Error "Expected exit -2, got $($p.ExitCode)" }
+
+      - name: Smoke Test Driver
+        shell: pwsh
+        run: |
+          # Verify the driver DLL's imports resolve (LoadLibrary runs DllMain).
+          $env:PATH = "$PWD\bin\artifacts\Release;$env:PATH"
+          Add-Type -Namespace Win32 -Name Native -MemberDefinition `
+            '[DllImport("kernel32.dll", SetLastError=true)] public static extern System.IntPtr LoadLibraryW([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string lpFileName);
+             [DllImport("kernel32.dll")] public static extern bool FreeLibrary(System.IntPtr h);'
+          $h = [Win32.Native]::LoadLibraryW("$PWD\bin\driver_01spacecalibrator\bin\win64\driver_01spacecalibrator.dll")
+          if ($h -eq [IntPtr]::Zero) {
+            $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            Write-Error "LoadLibrary failed, error $err"
+          }
+          [Win32.Native]::FreeLibrary($h) | Out-Null
+          Write-Host "Driver DLL loaded and unloaded cleanly"
+
       - name: Upload Overlay Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -95,6 +129,7 @@ jobs:
 
       - name: Package Release Artifacts
         if: steps.version_check.outputs.changed == 'true'
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release/overlay
           Copy-Item bin/artifacts/Release/SpaceCalibrator.exe release/overlay/
@@ -103,15 +138,17 @@ jobs:
           Copy-Item bin/artifacts/Release/icon.png release/overlay/
           Copy-Item bin/artifacts/Release/taskbar_icon.png release/overlay/
           Compress-Archive -Path release/overlay/* -DestinationPath SpaceCalibrator-Overlay.zip
-          Compress-Archive -Path bin/driver_01spacecalibrator/* -DestinationPath SpaceCalibrator-Driver.zip
+          # Keep the driver folder itself in the zip so it can be dropped into SteamVR's drivers directory as documented
+          Compress-Archive -Path bin/driver_01spacecalibrator -DestinationPath SpaceCalibrator-Driver.zip
 
       - name: Create Tag and Release
         if: steps.version_check.outputs.changed == 'true'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version_check.outputs.version }}
         run: |
-          $version = "${{ steps.version_check.outputs.version }}"
+          $version = $env:RELEASE_VERSION
           $tag = "v$version"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

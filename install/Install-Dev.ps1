@@ -12,10 +12,30 @@
 param(
     [switch]$OverlayOnly,
     [switch]$DriverOnly,
-    [string]$SteamVRRuntime = "E:\Steam\steamapps\common\SteamVR"
+    [string]$SteamVRRuntime = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $SteamVRRuntime) {
+    # Auto-detect the SteamVR runtime: the OpenVR runtime path is registered
+    # under HKLM\Software\Valve\VR; fall back to the default Steam library.
+    foreach ($key in @("HKLM:\SOFTWARE\WOW6432Node\Valve\VR", "HKLM:\SOFTWARE\Valve\VR")) {
+        try {
+            $SteamVRRuntime = (Get-ItemProperty $key -ErrorAction Stop).InstallPath
+        } catch { }
+        if ($SteamVRRuntime) { break }
+    }
+    if (-not $SteamVRRuntime) {
+        try {
+            $steamPath = (Get-ItemProperty "HKCU:\Software\Valve\Steam" -ErrorAction Stop).SteamPath
+            if ($steamPath) { $SteamVRRuntime = Join-Path $steamPath "steamapps\common\SteamVR" }
+        } catch { }
+    }
+    if (-not $SteamVRRuntime -or -not (Test-Path $SteamVRRuntime)) {
+        Write-Error "Could not locate the SteamVR runtime. Pass -SteamVRRuntime <path>."
+    }
+}
 
 $RepoRoot   = Split-Path -Parent $PSScriptRoot
 $Artifacts  = Join-Path $RepoRoot "bin\artifacts\Release"

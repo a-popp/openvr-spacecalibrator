@@ -64,16 +64,14 @@ private:
 		bool enabled = false;
 		bool quash = false;
 		IsoTransform transform, targetTransform;
-		double scale;
-		LARGE_INTEGER lastPoll;
+		double scale = 1.0;
+		LARGE_INTEGER lastPoll{};
 		DeltaSize currentRate = DeltaSize::TINY;
 	};
 
 	DeviceTransform transforms[vr::k_unMaxTrackedDeviceCount];
 	Eigen::Vector3d debugTransform;
 	Eigen::Quaterniond debugRotation;
-
-	DeltaSize currentDeltaSpeed[vr::k_unMaxTrackedDeviceCount];
 
 	protocol::AlignmentSpeedParams alignmentSpeedParams;
 

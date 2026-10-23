@@ -41,7 +41,7 @@ This program is designed to allow you to synchronise multiple playspaces with on
 
 Requirements:
 - Windows 10/11
-- [CMake](https://cmake.org/download/) 3.10+
+- [CMake](https://cmake.org/download/) 3.24+
 - Visual Studio 2022 (or Build Tools) with the C++ workload
 
 ```powershell
@@ -50,6 +50,51 @@ cd openvr-spacecalibrator
 cmake -G "Visual Studio 17 2022" -A x64 -B bin -S .
 cmake --build bin --config Release
 ```
+
+Build outputs land in `bin\artifacts\<Config>` (overlay) and `bin\driver_01spacecalibrator` (driver). `--recursive` is required — dependencies live in `lib/` as git submodules.
+
+> [!NOTE]
+> With CMake 4.x, add `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` to the configure command — the vendored minhook submodule declares compatibility with CMake < 3.5 only (this is what CI does).
+
+### Tests
+
+A small unit test suite covers the parts that don't need a live SteamVR session (calibration math, pose transforms, device matching, the shared-memory protocol). It's built by default as `SpaceCalibratorTests`; pass `-DSPACECAL_BUILD_TESTS=OFF` to skip it.
+
+```powershell
+cmake --build bin --config Release --target SpaceCalibratorTests
+ctest --test-dir bin -C Release --output-on-failure
+```
+
+### Development Installation
+
+After building, `install\Install-Dev.ps1` deploys the local build output to your SteamVR installation:
+
+```powershell
+# Installs both overlay and driver (auto-detects SteamVR from the registry)
+.\install\Install-Dev.ps1
+
+# Or install only one component / point at a specific SteamVR runtime
+.\install\Install-Dev.ps1 -OverlayOnly
+.\install\Install-Dev.ps1 -DriverOnly -SteamVRRuntime "D:\Steam\steamapps\common\SteamVR"
+```
+
+The script copies the overlay to `%LOCALAPPDATA%\SpaceCalibrator`, copies the driver into `<SteamVR>\drivers\driver_01spacecalibrator`, and re-registers the application manifest (SteamVR must be running for manifest registration).
+
+### Command-Line Options
+
+`SpaceCalibrator.exe` accepts the following flags (also used by the installer):
+
+| Flag | Effect |
+| ---- | ------ |
+| `-installmanifest` | Registers `manifest.vrmanifest` with SteamVR and enables auto-launch, then exits |
+| `-removemanifest` | Removes the application manifest from SteamVR, then exits |
+| `-activatemultipledrivers` | Enables the SteamVR `activateMultipleDrivers` setting, then exits |
+| `-openvrpath` | Prints the SteamVR runtime path, then exits |
+| `-console` | Opens a console window for debug output |
+
+### Profile Storage
+
+Calibration profiles are stored as JSON in the registry under `HKCU\Software\Classes\Local Settings\Software\OpenVR-SpaceCalibrator` (the `Config` value). This is a legacy location inherited from upstream, not a file on disk.
 
 ## Regular Calibration
 
@@ -62,7 +107,7 @@ To calibrate:
 4. Next, you'll see two lists at the top. On the left `Reference Space` column, select the controller you'll be calibrating along (e.g. Quest controller, Pico controller). On the right `Target Space`, select your SteamVR tracker (e.g. Vive Ultimate Tracker, Vive Tracker 3.0). You can use the Identify button to make the controllers blink and tracker LEDs flash to see if you've selected the correct ones.
 5. After you have confirmed your selection, physically place the `Target Space` tracker on top of the `Reference Space` controller.
 6. With the two device physically on top of each other, click the "Start calibration" button. As the calibration proceeds, move the device pair together as a unit around your play space. It's a good idea to include different kinds of motion, direction, and rotation as you do this to ensure a more accurate calibration.
-7. After calibration completes, you should see the silluhette of the your reference controller and target tracker occupy the same space in your HMD, which should match the physical position of the devices.
+7. After calibration completes, you should see the silhouette of your reference controller and target tracker occupy the same space in your HMD, which should match the physical position of the devices.
 
 ## Continuous Calibration
 

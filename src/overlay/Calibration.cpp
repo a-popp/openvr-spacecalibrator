@@ -13,64 +13,12 @@
 #include <Eigen/Dense>
 #include <GLFW/glfw3.h>
 
-inline vr::HmdQuaternion_t operator*(const vr::HmdQuaternion_t& lhs, const vr::HmdQuaternion_t& rhs) {
-	return {
-		(lhs.w * rhs.w) - (lhs.x * rhs.x) - (lhs.y * rhs.y) - (lhs.z * rhs.z),
-		(lhs.w * rhs.x) + (lhs.x * rhs.w) + (lhs.y * rhs.z) - (lhs.z * rhs.y),
-		(lhs.w * rhs.y) + (lhs.y * rhs.w) + (lhs.z * rhs.x) - (lhs.x * rhs.z),
-		(lhs.w * rhs.z) + (lhs.z * rhs.w) + (lhs.x * rhs.y) - (lhs.y * rhs.x)
-	};
-}
-
 CalibrationContext CalCtx;
 IPCClient Driver;
 static protocol::DriverPoseShmem shmem;
 
 namespace {
 	CalibrationCalc calibration;
-
-	inline vr::HmdVector3d_t quaternionRotateVector(const vr::HmdQuaternion_t& quat, const double(&vector)[3]) {
-		vr::HmdQuaternion_t vectorQuat = { 0.0, vector[0], vector[1] , vector[2] };
-		vr::HmdQuaternion_t conjugate = { quat.w, -quat.x, -quat.y, -quat.z };
-		auto rotatedVectorQuat = quat * vectorQuat * conjugate;
-		return { rotatedVectorQuat.x, rotatedVectorQuat.y, rotatedVectorQuat.z };
-	}
-
-	inline Eigen::Matrix3d quaternionRotateMatrix(const vr::HmdQuaternion_t& quat) {
-		return Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z).toRotationMatrix();
-	}
-
-	struct DSample
-	{
-		bool valid;
-		Eigen::Vector3d ref, target;
-	};
-
-	bool StartsWith(const std::string& str, const std::string& prefix)
-	{
-		if (str.length() < prefix.length())
-			return false;
-
-		return str.compare(0, prefix.length(), prefix) == 0;
-	}
-
-	bool EndsWith(const std::string& str, const std::string& suffix)
-	{
-		if (str.length() < suffix.length())
-			return false;
-
-		return str.compare(str.length() - suffix.length(), suffix.length(), suffix) == 0;
-	}
-
-	Eigen::Vector3d AxisFromRotationMatrix3(Eigen::Matrix3d rot)
-	{
-		return Eigen::Vector3d(rot(2, 1) - rot(1, 2), rot(0, 2) - rot(2, 0), rot(1, 0) - rot(0, 1));
-	}
-
-	double AngleFromRotationMatrix3(Eigen::Matrix3d rot)
-	{
-		return acos((rot(0, 0) + rot(1, 1) + rot(2, 2) - 1.0) / 2.0);
-	}
 
 	vr::HmdQuaternion_t VRRotationQuat(const Eigen::Quaterniond& rotQuat)
 	{
@@ -103,28 +51,6 @@ namespace {
 		vrTrans.v[1] = trans[1];
 		vrTrans.v[2] = trans[2];
 		return vrTrans;
-	}
-
-	DSample DeltaRotationSamples(Sample s1, Sample s2)
-	{
-		// Difference in rotation between samples.
-		auto dref = s1.ref.rot * s2.ref.rot.transpose();
-		auto dtarget = s1.target.rot * s2.target.rot.transpose();
-
-		// When stuck together, the two tracked objects rotate as a pair,
-		// therefore their axes of rotation must be equal between any given pair of samples.
-		DSample ds;
-		ds.ref = AxisFromRotationMatrix3(dref);
-		ds.target = AxisFromRotationMatrix3(dtarget);
-
-		// Reject samples that were too close to each other.
-		auto refA = AngleFromRotationMatrix3(dref);
-		auto targetA = AngleFromRotationMatrix3(dtarget);
-		ds.valid = refA > 0.4 && targetA > 0.4 && ds.ref.norm() > 0.01 && ds.target.norm() > 0.01;
-
-		ds.ref.normalize();
-		ds.target.normalize();
-		return ds;
 	}
 
 	Pose ConvertPose(const vr::DriverPose_t &driverPose) {
@@ -214,16 +140,19 @@ namespace {
 			CalCtx.targetID = state.FindDevice(CalCtx.targetStandby.trackingSystem, CalCtx.targetStandby.model, CalCtx.targetStandby.serial);
 		}
 
-		for (int i = 0; i < CalCtx.MAX_CONTROLLERS; i++) {
-			if (i < state.devices.size()
-				&& state.devices[i].trackingSystem == CalCtx.targetTrackingSystem
-				&& state.devices[i].deviceClass == vr::TrackedDeviceClass_Controller
-				&& (state.devices[i].controllerRole == vr::TrackedControllerRole_LeftHand || state.devices[i].controllerRole == vr::TrackedControllerRole_RightHand))
+		int slot = 0;
+		for (const auto& device : state.devices) {
+			if (slot >= CalCtx.MAX_CONTROLLERS)
+				break;
+			if (device.trackingSystem == CalCtx.targetTrackingSystem
+				&& device.deviceClass == vr::TrackedDeviceClass_Controller
+				&& (device.controllerRole == vr::TrackedControllerRole_LeftHand || device.controllerRole == vr::TrackedControllerRole_RightHand))
 			{
-				CalCtx.controllerIDs[i] = state.devices[i].id;
-			} else {
-				CalCtx.controllerIDs[i] = -1;
+				CalCtx.controllerIDs[slot++] = device.id;
 			}
+		}
+		while (slot < CalCtx.MAX_CONTROLLERS) {
+			CalCtx.controllerIDs[slot++] = -1;
 		}
 
 		return CalCtx.referenceID >= 0 && CalCtx.targetID >= 0;
@@ -429,7 +358,7 @@ void CalibrationTick(double time)
 
 	ctx.timeLastTick = time;
 	shmem.ReadNewPoses([&](const protocol::DriverPoseShmem::AugmentedPose& augmented_pose) {
-		if (augmented_pose.deviceId >= 0 && augmented_pose.deviceId <= vr::k_unMaxTrackedDeviceCount) {
+		if (augmented_pose.deviceId >= 0 && augmented_pose.deviceId < vr::k_unMaxTrackedDeviceCount) {
 			ctx.devicePoses[augmented_pose.deviceId] = augmented_pose.pose;
 		}
 	});
@@ -511,7 +440,7 @@ void CalibrationTick(double time)
 		ScanAndApplyProfile(ctx);
 
 		Metrics::jitterRef.Push(calibration.ReferenceJitter());
-		Metrics::jitterRef.Push(calibration.TargetJitter());
+		Metrics::jitterTarget.Push(calibration.TargetJitter());
 
 		if (!CalCtx.ReferencePoseIsValidSimple())
 		{

@@ -17,8 +17,8 @@ tm TimeForLog()
 {
 	auto now = std::chrono::system_clock::now();
 	auto nowTime = std::chrono::system_clock::to_time_t(now);
-	tm value;
-	auto tm = localtime_s(&value, &nowTime);
+	tm value{};
+	localtime_s(&value, &nowTime);
 	return value;
 }
 

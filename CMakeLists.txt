@@ -25,6 +25,13 @@ add_subdirectory ("src")
 # Libs
 add_subdirectory ("lib")
 
+# Unit tests (math/protocol helpers that don't need a live SteamVR session)
+option(SPACECAL_BUILD_TESTS "Build unit tests" ON)
+if (SPACECAL_BUILD_TESTS AND WIN32)
+	enable_testing()
+	add_subdirectory ("tests")
+endif()
+
 if ("${CMAKE_CXX_COMPILER}" MATCHES "Clang" OR "${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
 	# add_compile_options(-Werror=return-type -Wall -Wextra -Wpedantic /MP)
 	add_compile_options(-Werror=return-type /MP)

@@ -252,8 +252,11 @@ namespace protocol
 		}
 
 		void Close() {
-			if (pData) UnmapViewOfFile(pData);
-			if (hMapFile) CloseHandle(hMapFile);
+			if (pData) { UnmapViewOfFile(pData); pData = nullptr; }
+			if (hMapFile && hMapFile != INVALID_HANDLE_VALUE) {
+				CloseHandle(hMapFile);
+				hMapFile = INVALID_HANDLE_VALUE;
+			}
 		}
 
 		bool Create(LPCSTR segment_name) {
@@ -343,10 +346,11 @@ namespace protocol
 				if (pSampleTime) *pSampleTime = lastPose[index].sample_time;
 				return true;
 			}
+			return false;
 		}
 
 		void SetPose(int index, const vr::DriverPose_t& pose) {
-			if (index >= vr::k_unMaxTrackedDeviceCount) return;
+			if (index < 0 || index >= vr::k_unMaxTrackedDeviceCount) return;
 			if (pData == nullptr) return;
 
 			AugmentedPose augPose = {0};
@@ -354,9 +358,9 @@ namespace protocol
 			augPose.pose = pose;
 			QueryPerformanceCounter(&augPose.sample_time);
 
-			uint64_t cur_index = pData->index.load(std::memory_order_relaxed) + 1;
+			uint64_t cur_index = pData->index.load(std::memory_order_relaxed);
 			pData->poses[cur_index % BUFFERED_SAMPLES] = augPose;
-			pData->index.store(cur_index, std::memory_order_release);
+			pData->index.store(cur_index + 1, std::memory_order_release);
 		}
 	};
 }

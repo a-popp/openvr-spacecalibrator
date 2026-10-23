@@ -3,23 +3,7 @@
 #include "CalibrationMetrics.h"
 #include "Protocol.h"
 
-inline vr::HmdQuaternion_t operator*(const vr::HmdQuaternion_t& lhs, const vr::HmdQuaternion_t& rhs) {
-	return {
-		(lhs.w * rhs.w) - (lhs.x * rhs.x) - (lhs.y * rhs.y) - (lhs.z * rhs.z),
-		(lhs.w * rhs.x) + (lhs.x * rhs.w) + (lhs.y * rhs.z) - (lhs.z * rhs.y),
-		(lhs.w * rhs.y) + (lhs.y * rhs.w) + (lhs.z * rhs.x) - (lhs.x * rhs.z),
-		(lhs.w * rhs.z) + (lhs.z * rhs.w) + (lhs.x * rhs.y) - (lhs.y * rhs.x)
-	};
-}
-
 namespace {
-
-	inline vr::HmdVector3d_t quaternionRotateVector(const vr::HmdQuaternion_t& quat, const double(&vector)[3]) {
-		vr::HmdQuaternion_t vectorQuat = { 0.0, vector[0], vector[1] , vector[2] };
-		vr::HmdQuaternion_t conjugate = { quat.w, -quat.x, -quat.y, -quat.z };
-		auto rotatedVectorQuat = quat * vectorQuat * conjugate;
-		return { rotatedVectorQuat.x, rotatedVectorQuat.y, rotatedVectorQuat.z };
-	}
 
 	inline Eigen::Matrix3d quaternionRotateMatrix(const vr::HmdQuaternion_t& quat) {
 		return Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z).toRotationMatrix();
@@ -30,22 +14,6 @@ namespace {
 		bool valid;
 		Eigen::Vector3d ref, target;
 	};
-
-	bool StartsWith(const std::string& str, const std::string& prefix)
-	{
-		if (str.length() < prefix.length())
-			return false;
-
-		return str.compare(0, prefix.length(), prefix) == 0;
-	}
-
-	bool EndsWith(const std::string& str, const std::string& suffix)
-	{
-		if (str.length() < suffix.length())
-			return false;
-
-		return str.compare(str.length() - suffix.length(), suffix.length(), suffix) == 0;
-	}
 
 	Eigen::Vector3d AxisFromRotationMatrix3(Eigen::Matrix3d rot)
 	{
@@ -72,16 +40,6 @@ namespace {
 		vrRotQuat.z = rotQuat.coeffs()[2];
 		vrRotQuat.w = rotQuat.coeffs()[3];
 		return vrRotQuat;
-	}
-
-	vr::HmdVector3d_t VRTranslationVec(Eigen::Vector3d transcm)
-	{
-		auto trans = transcm * 0.01;
-		vr::HmdVector3d_t vrTrans;
-		vrTrans.v[0] = trans[0];
-		vrTrans.v[1] = trans[1];
-		vrTrans.v[2] = trans[2];
-		return vrTrans;
 	}
 
 	DSample DeltaRotationSamples(Sample s1, Sample s2)
@@ -381,7 +339,7 @@ double CalibrationCalc::ReferenceJitter() const {
 
 		if (sampleCount == 0) {
 			m_oldM = m_newM = sample.ref.trans;
-			m_oldS = Eigen::Vector3d();
+			m_oldS = Eigen::Vector3d::Zero();
 		} else {
 			m_newM = m_oldM + (sample.ref.trans - m_oldM) / sampleCount;
 			m_newS = m_oldS + (sample.ref.trans - m_oldM).cwiseProduct(sample.ref.trans - m_newM);
@@ -394,9 +352,9 @@ double CalibrationCalc::ReferenceJitter() const {
 		sampleCount++;
 	}
 
-	double var_x = sqrt(((sampleCount > 1) ? m_newS.x() / (sampleCount - 1) : 0.0));
-	double var_y = sqrt(((sampleCount > 1) ? m_newS.y() / (sampleCount - 1) : 0.0));
-	double var_z = sqrt(((sampleCount > 1) ? m_newS.z() / (sampleCount - 1) : 0.0));
+	double var_x = sqrt(((sampleCount > 1) ? std::abs(m_newS.x() / (sampleCount - 1)) : 0.0));
+	double var_y = sqrt(((sampleCount > 1) ? std::abs(m_newS.y() / (sampleCount - 1)) : 0.0));
+	double var_z = sqrt(((sampleCount > 1) ? std::abs(m_newS.z() / (sampleCount - 1)) : 0.0));
 
 	// Take magnitude of standard deviation vector
 	return sqrt(var_x * var_x + var_y * var_y + var_z * var_z);
@@ -411,7 +369,7 @@ double CalibrationCalc::TargetJitter() const {
 
 		if (sampleCount == 0) {
 			m_oldM = m_newM = sample.target.trans;
-			m_oldS = Eigen::Vector3d();
+			m_oldS = Eigen::Vector3d::Zero();
 		}
 		else {
 			m_newM = m_oldM + (sample.target.trans - m_oldM) / sampleCount;
@@ -582,6 +540,9 @@ namespace {
 
 				sampleCount++;
 			}
+
+			if (sampleCount == 0)
+				return Eigen::AffineCompact3d::Identity();
 
 			PoseAverager accum(sampleCount);
 

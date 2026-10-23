@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include <imgui/imgui.h>
 #include "imgui_extensions.h"
 
@@ -137,8 +138,7 @@ void BuildContinuousCalDisplay() {
 	ImGui::End();
 }
 
-static void ScaledDragFloat(const char* label, double& f, double scale, double min, double max, int flags = ImGuiSliderFlags_AlwaysClamp) {
-	float v = (float) (f * scale);
+static void DrawScaledSlider(const char* label, float& v, double min, double max, int flags) {
 	std::string labelStr = std::string(label);
 
 	// If starts with ##, just do a normal SliderFloat
@@ -157,8 +157,22 @@ static void ScaledDragFloat(const char* label, double& f, double scale, double m
 		ImGui::SliderFloat((std::string("##") + label).c_str(), &v, (float)min, (float)max, "%1.2f", flags);
 		ImGui::PopID();
 	}
-	
+}
+
+static void ScaledDragFloat(const char* label, double& f, double scale, double min, double max, int flags = ImGuiSliderFlags_AlwaysClamp) {
+	float v = (float) (f * scale);
+	DrawScaledSlider(label, v, min, max, flags);
 	f = v / scale;
+}
+
+// For thresholds stored as squared distances: displays sqrt(f) * scale and
+// writes back (v / scale)^2, so the UI shows the effective linear distance
+// that the driver compares against.
+static void SquaredScaledDragFloat(const char* label, double& f, double scale, double min, double max, int flags = ImGuiSliderFlags_AlwaysClamp) {
+	float v = (float) (std::sqrt(f > 0.0 ? f : 0.0) * scale);
+	DrawScaledSlider(label, v, min, max, flags);
+	const double linear = v / scale;
+	f = linear * linear;
 }
 
 void CCal_DrawSettings() {
@@ -220,7 +234,7 @@ void CCal_DrawSettings() {
 			ImGui::TableSetColumnIndex(0);
 			ImGui::Text("Decel");
 			ImGui::TableSetColumnIndex(1);
-			ScaledDragFloat("##TransDecel", CalCtx.alignmentSpeedParams.thr_trans_tiny, 1000.0, 0, 20.0);
+			SquaredScaledDragFloat("##TransDecel", CalCtx.alignmentSpeedParams.thr_trans_tiny, 1000.0, 0, 150.0);
 			ImGui::TableSetColumnIndex(2);
 			ScaledDragFloat("##RotDecel", CalCtx.alignmentSpeedParams.thr_rot_tiny, 180.0 / EIGEN_PI, 0, 5.0);
 
@@ -228,8 +242,8 @@ void CCal_DrawSettings() {
 			ImGui::TableSetColumnIndex(0);
 			ImGui::Text("Slow");
 			ImGui::TableSetColumnIndex(1);
-			ScaledDragFloat("##TransSlow", CalCtx.alignmentSpeedParams.thr_trans_small, 1000.0,
-				CalCtx.alignmentSpeedParams.thr_trans_tiny * 1000.0, 20.0);
+			SquaredScaledDragFloat("##TransSlow", CalCtx.alignmentSpeedParams.thr_trans_small, 1000.0,
+				std::sqrt(CalCtx.alignmentSpeedParams.thr_trans_tiny) * 1000.0, 150.0);
 			ImGui::TableSetColumnIndex(2);
 			ScaledDragFloat("##RotSlow", CalCtx.alignmentSpeedParams.thr_rot_small, 180.0 / EIGEN_PI,
 				CalCtx.alignmentSpeedParams.thr_rot_tiny * (180.0 / EIGEN_PI), 10.0);
@@ -238,8 +252,8 @@ void CCal_DrawSettings() {
 			ImGui::TableSetColumnIndex(0);
 			ImGui::Text("Fast");
 			ImGui::TableSetColumnIndex(1);
-			ScaledDragFloat("##TransFast", CalCtx.alignmentSpeedParams.thr_trans_large, 1000.0,
-				CalCtx.alignmentSpeedParams.thr_trans_small * 1000.0, 50.0);
+			SquaredScaledDragFloat("##TransFast", CalCtx.alignmentSpeedParams.thr_trans_large, 1000.0,
+				std::sqrt(CalCtx.alignmentSpeedParams.thr_trans_small) * 1000.0, 250.0);
 			ImGui::TableSetColumnIndex(2);
 			ScaledDragFloat("##RotFast", CalCtx.alignmentSpeedParams.thr_rot_large, 180.0 / EIGEN_PI,
 				CalCtx.alignmentSpeedParams.thr_rot_small * (180.0 / EIGEN_PI), 20.0);
@@ -690,7 +704,7 @@ void BuildSystemSelection(const VRState &state)
 	}
 
 	ImGui::PushItemWidth(paneWidth);
-	ImGui::Combo("##ReferenceTrackingSystem", &currentReferenceSystem, &referenceSystemsUi[0], (int)referenceSystemsUi.size());
+	ImGui::Combo("##ReferenceTrackingSystem", &currentReferenceSystem, referenceSystemsUi.data(), (int)referenceSystemsUi.size());
 
 	if (currentReferenceSystem != -1 && currentReferenceSystem < (int) referenceSystems.size())
 	{
@@ -725,7 +739,7 @@ void BuildSystemSelection(const VRState &state)
 	}
 
 	ImGui::SameLine();
-	ImGui::Combo("##TargetTrackingSystem", &currentTargetSystem, &targetSystemsUi[0], (int)targetSystemsUi.size());
+	ImGui::Combo("##TargetTrackingSystem", &currentTargetSystem, targetSystemsUi.data(), (int)targetSystemsUi.size());
 
 	if (currentTargetSystem != -1 && currentTargetSystem < targetSystems.size())
 	{
@@ -898,8 +912,10 @@ void BuildDeviceSelections(const VRState &state)
 	{
 		for (unsigned i = 0; i < 100; ++i)
 		{
-			vr::VRSystem()->TriggerHapticPulse(CalCtx.targetID, 0, 2000);
-			vr::VRSystem()->TriggerHapticPulse(CalCtx.referenceID, 0, 2000);
+			if (CalCtx.targetID >= 0)
+				vr::VRSystem()->TriggerHapticPulse(CalCtx.targetID, 0, 2000);
+			if (CalCtx.referenceID >= 0)
+				vr::VRSystem()->TriggerHapticPulse(CalCtx.referenceID, 0, 2000);
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
 	}

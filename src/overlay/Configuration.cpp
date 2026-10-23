@@ -117,15 +117,39 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 
 	auto obj = arr[0].get<picojson::object>();
 
+	// Tolerate missing keys so profiles written by older versions or other
+	// forks still load instead of tripping picojson type assertions.
+	auto loadStr = [&](const char* key, std::string& dst) {
+		const picojson::value& node = obj[key];
+		if (node.is<std::string>()) {
+			dst = node.get<std::string>();
+			return true;
+		}
+		return false;
+	};
+	auto loadDbl = [&](const char* key, double& dst) {
+		const picojson::value& node = obj[key];
+		if (node.is<double>()) {
+			dst = node.get<double>();
+			return true;
+		}
+		return false;
+	};
+
 	LoadAlignmentParams(ctx, obj["alignment_params"]);
-	ctx.referenceTrackingSystem = obj["reference_tracking_system"].get<std::string>();
-	ctx.targetTrackingSystem = obj["target_tracking_system"].get<std::string>();
-	ctx.calibratedRotation(0) = obj["roll"].get<double>();
-	ctx.calibratedRotation(1) = obj["yaw"].get<double>();
-	ctx.calibratedRotation(2) = obj["pitch"].get<double>();
-	ctx.calibratedTranslation(0) = obj["x"].get<double>();
-	ctx.calibratedTranslation(1) = obj["y"].get<double>();
-	ctx.calibratedTranslation(2) = obj["z"].get<double>();
+
+	// A usable profile needs the core calibration keys; without them the
+	// transform members keep their zero defaults, and the profile must not
+	// be marked valid or those values would be pushed to the driver.
+	bool hasCoreTransform = true;
+	hasCoreTransform &= loadStr("reference_tracking_system", ctx.referenceTrackingSystem);
+	hasCoreTransform &= loadStr("target_tracking_system", ctx.targetTrackingSystem);
+	hasCoreTransform &= loadDbl("roll", ctx.calibratedRotation(0));
+	hasCoreTransform &= loadDbl("yaw", ctx.calibratedRotation(1));
+	hasCoreTransform &= loadDbl("pitch", ctx.calibratedRotation(2));
+	hasCoreTransform &= loadDbl("x", ctx.calibratedTranslation(0));
+	hasCoreTransform &= loadDbl("y", ctx.calibratedTranslation(1));
+	hasCoreTransform &= loadDbl("z", ctx.calibratedTranslation(2));
 	LoadStandby(ctx.referenceStandby, obj["reference_device"]);
 	LoadStandby(ctx.targetStandby, obj["target_device"]);
 	if (obj["autostart_continuous_calibration"].evaluate_as_boolean()) {
@@ -134,9 +158,9 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 	ctx.quashTargetInContinuous = obj["quash_target_in_continuous"].evaluate_as_boolean();
 	ctx.requireTriggerPressToApply = obj["require_trigger_press_to_apply"].evaluate_as_boolean();
 	ctx.ignoreOutliers = obj["ignore_outliers"].evaluate_as_boolean();
-	ctx.continuousCalibrationOffset(0) = obj["continuous_calibration_target_offset_x"].get<double>();
-	ctx.continuousCalibrationOffset(1) = obj["continuous_calibration_target_offset_y"].get<double>();
-	ctx.continuousCalibrationOffset(2) = obj["continuous_calibration_target_offset_z"].get<double>();
+	loadDbl("continuous_calibration_target_offset_x", ctx.continuousCalibrationOffset(0));
+	loadDbl("continuous_calibration_target_offset_y", ctx.continuousCalibrationOffset(1));
+	loadDbl("continuous_calibration_target_offset_z", ctx.continuousCalibrationOffset(2));
 	if (obj["static_calibration"].is<bool>()) {
 		ctx.enableStaticRecalibration = obj["static_calibration"].get<bool>();
 	}
@@ -163,7 +187,9 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 
 	if (obj["chaperone"].is<picojson::object>()) {
 		auto chaperone = obj["chaperone"].get<picojson::object>();
-		ctx.chaperone.autoApply = chaperone["auto_apply"].get<bool>();
+		if (chaperone["auto_apply"].is<bool>()) {
+			ctx.chaperone.autoApply = chaperone["auto_apply"].get<bool>();
+		}
 
 		LoadFloatArray(chaperone["play_space_size"], ctx.chaperone.playSpaceSize.v, 2);
 
@@ -194,15 +220,19 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 	}
 	if (obj["relative_transform"].is<picojson::object>()) {
 		auto relTransform = obj["relative_transform"].get<picojson::object>();
-		Eigen::Vector3d refToTragetRoation;
-		Eigen::Vector3d refToTargetTranslation;
+		Eigen::Vector3d refToTragetRoation = Eigen::Vector3d::Zero();
+		Eigen::Vector3d refToTargetTranslation = Eigen::Vector3d::Zero();
 
-		refToTragetRoation(0) = relTransform["roll"].get<double>();
-		refToTragetRoation(1) = relTransform["yaw"].get<double>();
-		refToTragetRoation(2) = relTransform["pitch"].get<double>();
-		refToTargetTranslation(0) = relTransform["x"].get<double>();
-		refToTargetTranslation(1) = relTransform["y"].get<double>();
-		refToTargetTranslation(2) = relTransform["z"].get<double>();
+		auto loadRel = [&](const char* key, double& dst) {
+			const picojson::value& node = relTransform[key];
+			if (node.is<double>()) dst = node.get<double>();
+		};
+		loadRel("roll", refToTragetRoation(0));
+		loadRel("yaw", refToTragetRoation(1));
+		loadRel("pitch", refToTragetRoation(2));
+		loadRel("x", refToTargetTranslation(0));
+		loadRel("y", refToTargetTranslation(1));
+		loadRel("z", refToTargetTranslation(2));
 
 		Eigen::Matrix3d rotationMatrix;
 		rotationMatrix =
@@ -215,7 +245,7 @@ static void ParseProfile(CalibrationContext &ctx, std::istream &stream)
 		ctx.refToTargetPose.translation() = refToTargetTranslation;
 	}
 
-	ctx.validProfile = true;
+	ctx.validProfile = hasCoreTransform;
 }
 
 
